@@ -23,7 +23,7 @@
       <h1>What would you like to practice reading?</h1>
       <p class="hint">Type or paste your text below — no document needed — or upload a plain text file instead.</p>
 
-      <textarea id="text-input" placeholder="Type or paste the text you want to practice reading aloud…" rows="10"></textarea>
+      <textarea id="text-input" placeholder="Type or paste the text you want to practice reading aloud…" rows="10" spellcheck="true" lang="en"></textarea>
 
       <div class="upload-row">
         <label class="file-upload-btn">
@@ -58,6 +58,8 @@
 
       <div class="example-row">
         <button id="play-example-btn" class="secondary-btn">🔊 Hear the opening lines</button>
+        <button id="play-full-btn" class="secondary-btn">🔊 Hear the Full Reading</button>
+        <button id="stop-example-btn" class="ghost-btn" hidden>⏹ Stop</button>
         <span id="example-status" class="status-text"></span>
       </div>
 

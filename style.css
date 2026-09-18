@@ -105,13 +105,18 @@ button { font-family: inherit; cursor: pointer; }
 .settings-panel input[type=range] { width: 100%; accent-color: var(--accent); }
 .more-settings { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.8rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; }
 
-.example-row { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
+.example-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .status-text { color: var(--muted); font-size: 0.85rem; }
 
 .reading-text {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 1.4rem; font-size: 1.15rem; line-height: 2; margin-bottom: 1.2rem;
   max-height: 46vh; overflow-y: auto;
+}
+.reading-line { display: block; margin-bottom: 0.3rem; }
+.line-number {
+  display: inline-block; color: var(--muted); font-size: 0.78rem;
+  margin-right: 0.5rem; min-width: 1.4em; user-select: none;
 }
 .reading-text .word { padding: 0.05rem 0.15rem; border-radius: 4px; cursor: pointer; }
 .reading-text .word.current { background: var(--accent-soft); color: var(--accent); font-weight: 700; }

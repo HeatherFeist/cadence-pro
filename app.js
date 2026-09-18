@@ -8,8 +8,9 @@
 // STATE
 // ------------------------------------------------------------
 var state = {
-  words: [],              // [{text, clean}] -- clean = lowercased, punctuation-stripped, for matching
-  currentIndex: 0,        // which word the pacing highlighter is on
+  words: [],              // flat [{text, clean}] across the whole document -- clean = lowercased, punctuation-stripped, for matching
+  lines: [],               // [{number, startIndex, endIndex}] -- number is OUR OWN sequential display number, never derived from (and never re-adding) any number already in the source text
+  currentIndex: 0,        // which word the highlighter (pacing timer OR AI-reading playback) is on
   paceWpm: 160,
   recording: false,
   paused: false,
@@ -47,6 +48,8 @@ function resolveVoice(voices) {
       || null; // null -> browser's own current default voice/lang is used
 }
 
+// Simple, non-highlighted playback -- used only for the results screen's
+// "tap a flagged word to hear it" (a single word, nothing to sync).
 function speak(text, onEnd) {
   if (!window.speechSynthesis || !text) { if (onEnd) onEnd(); return; }
   window.speechSynthesis.cancel();
@@ -69,13 +72,20 @@ function speak(text, onEnd) {
     withVoice(voices);
   } else {
     window.speechSynthesis.onvoiceschanged = function() { withVoice(window.speechSynthesis.getVoices()); };
-    // Safety timeout in case voiceschanged never fires on this browser.
     setTimeout(function() { if (!_voiceResolved) withVoice(window.speechSynthesis.getVoices()); }, 800);
   }
 }
 
 // ------------------------------------------------------------
-// TEXT INTAKE
+// TEXT INTAKE + PARSING
+//
+// Splits into LINES (by newline -- matching how a numbered practice
+// script is actually formatted) rather than sentences. Any number
+// already at the start of a line in the SOURCE text (e.g. "1. ", "2) ",
+// "(3) ") is stripped and never becomes part of what gets spoken or
+// matched -- Cadence always generates its OWN sequential display number
+// instead, so a gap or inconsistency in the source's own numbering never
+// matters, and numbers are never accidentally read aloud as words.
 // ------------------------------------------------------------
 var textInput = document.getElementById('text-input');
 var fileInput = document.getElementById('file-input');
@@ -103,13 +113,41 @@ function cleanWord(w) {
   return w.toLowerCase().replace(/[^a-z0-9']/g, '');
 }
 
-function tokenize(text) {
-  var raw = text.trim().split(/\s+/).filter(function(w) { return w.length > 0; });
-  return raw.map(function(w) { return { text: w, clean: cleanWord(w) }; });
+var LEADING_NUMBER_RE = /^\(?\d+\)?\s*[.):-]?\s+/;
+
+function parseText(text) {
+  var rawLines = text.split(/\r?\n/);
+  var words = [];
+  var lines = [];
+  var displayNumber = 0;
+
+  rawLines.forEach(function(rawLine) {
+    var trimmed = rawLine.trim();
+    if (!trimmed) return; // blank lines are just spacing in the source -- skip them entirely, don't burn a number on them
+
+    var withoutLeadingNumber = trimmed.replace(LEADING_NUMBER_RE, '');
+    displayNumber++;
+    var startIndex = words.length;
+    var lineWords = withoutLeadingNumber.split(/\s+/).filter(function(w) { return w.length > 0; });
+    lineWords.forEach(function(w) { words.push({ text: w, clean: cleanWord(w) }); });
+
+    // A line that was ONLY a number (rare, but possible with odd source
+    // formatting) ends up with zero words after stripping -- skip adding
+    // an empty line rather than showing a bare number with nothing after it.
+    if (lineWords.length > 0) {
+      lines.push({ number: displayNumber, startIndex: startIndex, endIndex: words.length - 1 });
+    } else {
+      displayNumber--;
+    }
+  });
+
+  return { words: words, lines: lines };
 }
 
 startBtn.addEventListener('click', function() {
-  state.words = tokenize(textInput.value);
+  var parsed = parseText(textInput.value);
+  state.words = parsed.words;
+  state.lines = parsed.lines;
   state.currentIndex = 0;
   state.recognizedWords = [];
   state.totalReadMs = 0;
@@ -119,6 +157,7 @@ startBtn.addEventListener('click', function() {
 
 document.getElementById('back-btn').addEventListener('click', function() {
   stopEverything();
+  stopExampleSpeech();
   showScreen('screen-upload');
 });
 
@@ -146,36 +185,162 @@ document.getElementById('settings-toggle-btn').addEventListener('click', functio
 });
 
 // ------------------------------------------------------------
-// "HEAR THE OPENING LINES" -- reads roughly the first 2-3 sentences (or
-// the first ~25 words if the text has no clear sentence breaks) to set
-// tone and pace, NOT the whole document.
+// AI VOICE READING (opening lines OR the full text), WITH THE SAME WORD
+// HIGHLIGHTER USED DURING RECORDING
+//
+// speakRange() speaks one line's words as a single utterance and drives
+// state.currentIndex from the browser's own `onboundary` word-boundary
+// events, so the highlighter tracks the ACTUAL voice as it speaks --
+// rather than a fixed timer, which is what drives the highlighter later
+// during the reader's own recording (see startHighlightTimer()). Chained
+// line-by-line (not one utterance for the whole document) so long texts
+// stay reliable and the highlighter naturally resets to each line's start.
 // ------------------------------------------------------------
+var _exampleReadingCancelled = false;
+
+function speakRange(startIdx, endIdx, onEnd) {
+  var subset = state.words.slice(startIdx, endIdx + 1);
+  var text = subset.map(function(w) { return w.text; }).join(' ');
+  if (!text) { if (onEnd) onEnd(); return; }
+
+  // Character offset of each word within `text`, so onboundary's
+  // charIndex can be mapped back to which word is currently being spoken.
+  var offsets = [];
+  var pos = 0;
+  subset.forEach(function(w) {
+    offsets.push(pos);
+    pos += w.text.length + 1; // +1 accounts for the joining space
+  });
+
+  if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
+  window.speechSynthesis.cancel();
+  var utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 0.95;
+
+  function withVoice(voices) {
+    if (!_voiceResolved && voices && voices.length) {
+      _resolvedVoice = resolveVoice(voices);
+      _voiceResolved = true;
+    }
+    if (_resolvedVoice) utter.voice = _resolvedVoice;
+
+    utter.onboundary = function(e) {
+      // Some engines only ever fire word boundaries; others also fire
+      // sentence boundaries -- only word events should move the highlighter.
+      if (e.name && e.name !== 'word') return;
+      var wIdx = 0;
+      for (var k = 0; k < offsets.length; k++) {
+        if (offsets[k] <= e.charIndex) wIdx = k; else break;
+      }
+      state.currentIndex = startIdx + wIdx;
+      updateHighlight();
+    };
+    utter.onend = function() { if (onEnd) onEnd(); };
+    utter.onerror = function() { if (onEnd) onEnd(); };
+    window.speechSynthesis.speak(utter);
+  }
+
+  var voices = window.speechSynthesis.getVoices();
+  if (voices && voices.length) {
+    withVoice(voices);
+  } else {
+    window.speechSynthesis.onvoiceschanged = function() { withVoice(window.speechSynthesis.getVoices()); };
+    setTimeout(function() { if (!_voiceResolved) withVoice(window.speechSynthesis.getVoices()); }, 800);
+  }
+}
+
+function speakLines(lineList, onEnd) {
+  var idx = 0;
+  function next() {
+    // Checked on every step, not just at the start, so Stop can interrupt
+    // mid-chain -- calling speechSynthesis.cancel() alone isn't enough,
+    // since some browsers still fire the pending utterance's onend and
+    // would otherwise just continue on to the next line.
+    if (_exampleReadingCancelled || idx >= lineList.length) { if (onEnd) onEnd(); return; }
+    var line = lineList[idx];
+    idx++;
+    speakRange(line.startIndex, line.endIndex, next);
+  }
+  next();
+}
+
+function setExamplePlayingUI(isPlaying) {
+  document.getElementById('play-example-btn').hidden = isPlaying;
+  document.getElementById('play-full-btn').hidden = isPlaying;
+  document.getElementById('stop-example-btn').hidden = !isPlaying;
+}
+
 document.getElementById('play-example-btn').addEventListener('click', function() {
-  var status = document.getElementById('example-status');
-  var fullText = textInput.value;
-  var sentenceMatch = fullText.match(/(?:[^.!?]+[.!?]+){1,3}/);
-  var opening = sentenceMatch ? sentenceMatch[0].trim() : state.words.slice(0, 25).map(function(w){return w.text;}).join(' ');
-  status.textContent = '🔊 Playing…';
-  speak(opening, function() { status.textContent = ''; });
+  if (!state.lines.length) return;
+  _exampleReadingCancelled = false;
+  setExamplePlayingUI(true);
+  document.getElementById('example-status').textContent = '🔊 Playing the opening…';
+  var opening = state.lines.slice(0, 2); // first 1-2 lines -- enough to set tone/pace, not the whole document
+  speakLines(opening, function() {
+    setExamplePlayingUI(false);
+    document.getElementById('example-status').textContent = '';
+  });
 });
 
+document.getElementById('play-full-btn').addEventListener('click', function() {
+  if (!state.lines.length) return;
+  _exampleReadingCancelled = false;
+  setExamplePlayingUI(true);
+  document.getElementById('example-status').textContent = '🔊 Reading the full text…';
+  speakLines(state.lines, function() {
+    setExamplePlayingUI(false);
+    document.getElementById('example-status').textContent = '';
+  });
+});
+
+document.getElementById('stop-example-btn').addEventListener('click', function() {
+  stopExampleSpeech();
+});
+
+function stopExampleSpeech() {
+  _exampleReadingCancelled = true;
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  setExamplePlayingUI(false);
+  document.getElementById('example-status').textContent = '';
+}
+
 // ------------------------------------------------------------
-// RENDERING THE PACING TEXT (clickable words, current-word highlight)
+// RENDERING THE PACING TEXT -- grouped by line, each with a visible
+// display number that is NEVER part of state.words (see parseText()) so
+// it can never end up highlighted, matched, or spoken.
 // ------------------------------------------------------------
 function renderReadingText() {
   var container = document.getElementById('reading-text');
   container.innerHTML = '';
-  state.words.forEach(function(w, i) {
-    var span = document.createElement('span');
-    span.className = 'word';
-    span.textContent = w.text + ' ';
-    span.dataset.index = i;
+  state.lines.forEach(function(line) {
+    var lineDiv = document.createElement('div');
+    lineDiv.className = 'reading-line';
+
+    var numSpan = document.createElement('span');
+    numSpan.className = 'line-number';
+    numSpan.textContent = line.number + '.';
+    lineDiv.appendChild(numSpan);
+
+    for (var i = line.startIndex; i <= line.endIndex; i++) {
+      lineDiv.appendChild(makeWordSpan(i, false));
+    }
+    container.appendChild(lineDiv);
+  });
+  updateHighlight();
+}
+
+function makeWordSpan(i, forResults) {
+  var w = state.words[i];
+  var span = document.createElement('span');
+  span.className = 'word';
+  span.textContent = w.text + ' ';
+  span.dataset.index = i;
+  if (!forResults) {
     span.addEventListener('click', function() {
       if (state.paused) repositionTo(i);
     });
-    container.appendChild(span);
-  });
-  updateHighlight();
+  }
+  return span;
 }
 
 function updateHighlight() {
@@ -226,6 +391,10 @@ function startOrResumeRecording() {
     alert('This browser does not support microphone recording.');
     return;
   }
+
+  // Never let the AI's own example reading keep talking (or keep the
+  // highlighter under its control) once the reader starts recording.
+  stopExampleSpeech();
 
   navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
     state.micStream = stream;
@@ -383,8 +552,11 @@ function showResults() {
   document.getElementById('stat-pace').textContent = wpm ? (wpm + ' wpm') : '—';
   document.getElementById('stat-flagged').textContent = SpeechRecognitionCtor ? String(flaggedCount) : '—';
 
+  var existingNote = document.getElementById('no-recognition-note');
+  if (existingNote) existingNote.remove();
   if (!SpeechRecognitionCtor) {
     var note = document.createElement('p');
+    note.id = 'no-recognition-note';
     note.className = 'hint';
     note.textContent = 'This browser doesn’t support live speech recognition, so word-accuracy feedback isn’t available here — pacing is still tracked.';
     document.getElementById('results-text').parentNode.insertBefore(note, document.getElementById('results-text'));
@@ -392,15 +564,24 @@ function showResults() {
 
   var resultsText = document.getElementById('results-text');
   resultsText.innerHTML = '';
-  state.words.forEach(function(w, i) {
-    var span = document.createElement('span');
-    span.className = 'word' + (!matched[i] ? ' flagged' : '');
-    span.textContent = w.text + ' ';
-    if (!matched[i]) {
-      span.title = 'Tap to hear how this should sound';
-      span.addEventListener('click', function() { speak(w.text); });
+  state.lines.forEach(function(line) {
+    var lineDiv = document.createElement('div');
+    lineDiv.className = 'reading-line';
+    var numSpan = document.createElement('span');
+    numSpan.className = 'line-number';
+    numSpan.textContent = line.number + '.';
+    lineDiv.appendChild(numSpan);
+    for (var i = line.startIndex; i <= line.endIndex; i++) {
+      var w = state.words[i];
+      var span = makeWordSpan(i, true);
+      if (!matched[i]) {
+        span.classList.add('flagged');
+        span.title = 'Tap to hear how this should sound';
+        (function(word) { span.addEventListener('click', function() { speak(word); }); })(w.text);
+      }
+      lineDiv.appendChild(span);
     }
-    resultsText.appendChild(span);
+    resultsText.appendChild(lineDiv);
   });
 
   var playbackRow = document.getElementById('playback-row');
