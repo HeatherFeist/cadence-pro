@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cadence — read aloud with confidence</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">◈</span>
+      <span class="brand-name">Cadence</span>
+    </div>
+    <p class="tagline">Read aloud with confidence.</p>
+  </header>
+
+  <main>
+
+    <!-- ===== SCREEN 1: bring your own text ===== -->
+    <section id="screen-upload" class="screen active">
+      <h1>What would you like to practice reading?</h1>
+      <p class="hint">Paste text below, or upload a plain text file.</p>
+
+      <textarea id="text-input" placeholder="Paste the text you want to practice reading aloud…" rows="10"></textarea>
+
+      <div class="upload-row">
+        <label class="file-upload-btn">
+          📄 Upload a .txt file
+          <input type="file" id="file-input" accept=".txt,text/plain" hidden />
+        </label>
+        <span id="upload-filename" class="upload-filename"></span>
+      </div>
+
+      <button id="start-btn" class="primary-btn" disabled>Continue →</button>
+    </section>
+
+    <!-- ===== SCREEN 2: settings + reading ===== -->
+    <section id="screen-reading" class="screen">
+      <div class="reading-toolbar">
+        <button id="back-btn" class="ghost-btn" title="Start over with different text">← Different text</button>
+
+        <div class="settings-panel">
+          <label for="pace-slider">Pace <span id="pace-display">160 wpm</span></label>
+          <input type="range" id="pace-slider" min="80" max="260" step="10" value="160" />
+        </div>
+
+        <button id="settings-toggle-btn" class="ghost-btn" title="More settings">⚙</button>
+      </div>
+
+      <div id="more-settings" class="more-settings" hidden>
+        <label>
+          <input type="checkbox" id="voice-gender-pref" />
+          Prefer a different voice tone for the example reading
+        </label>
+      </div>
+
+      <div class="example-row">
+        <button id="play-example-btn" class="secondary-btn">🔊 Hear the opening lines</button>
+        <span id="example-status" class="status-text"></span>
+      </div>
+
+      <div id="reading-text" class="reading-text" aria-live="off"></div>
+
+      <div class="record-controls">
+        <button id="record-btn" class="record-btn">⏺ Start Reading</button>
+        <button id="pause-btn" class="ghost-btn" hidden>⏸ Pause</button>
+        <button id="finish-btn" class="primary-btn" hidden>✓ I'm Done — Review My Reading</button>
+      </div>
+
+      <p class="reposition-hint" id="reposition-hint" hidden>Paused. Click any word below to jump the pacing guide there, then hit Start Reading to continue.</p>
+    </section>
+
+    <!-- ===== SCREEN 3: results ===== -->
+    <section id="screen-results" class="screen">
+      <h1>Here's how it went</h1>
+
+      <div class="results-summary">
+        <div class="stat-tile">
+          <div class="stat-value" id="stat-accuracy">—</div>
+          <div class="stat-label">Words matched</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-value" id="stat-pace">—</div>
+          <div class="stat-label">Your pace</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-value" id="stat-flagged">—</div>
+          <div class="stat-label">Words to practice</div>
+        </div>
+      </div>
+
+      <div class="playback-row" id="playback-row" hidden>
+        <span>🎧 Your reading:</span>
+        <audio id="recording-playback" controls></audio>
+      </div>
+
+      <h2>Words and lines to practice</h2>
+      <p class="hint">Tap any highlighted word to hear how it should sound.</p>
+      <div id="results-text" class="reading-text results-text"></div>
+
+      <div class="results-actions">
+        <button id="try-again-btn" class="secondary-btn">↻ Read This Again</button>
+        <button id="new-text-btn" class="ghost-btn">Practice Different Text</button>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
