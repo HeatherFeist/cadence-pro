@@ -33,7 +33,30 @@
         <span id="upload-filename" class="upload-filename"></span>
       </div>
 
+      <div class="or-divider"><span>or</span></div>
+
+      <button id="go-dictate-btn" class="secondary-btn">🎙️ Dictate It Instead — Speak and I'll Transcribe It</button>
+
       <button id="start-btn" class="primary-btn" disabled>Continue →</button>
+    </section>
+
+    <!-- ===== SCREEN 1b: dictate + auto-format ===== -->
+    <section id="screen-dictate" class="screen">
+      <h1>Speak, and I'll transcribe it for you</h1>
+      <p class="hint">
+        Say your words naturally, and say these out loud to add real punctuation and structure:
+        <strong>period, comma, question mark, exclamation point, colon, semicolon, hyphen, new line, new paragraph</strong>.
+      </p>
+
+      <div id="dictate-output" class="reading-text dictate-output" aria-live="polite"></div>
+
+      <div class="record-controls">
+        <button id="dictate-start-btn" class="record-btn">⏺ Start Dictating</button>
+        <button id="dictate-stop-btn" class="ghost-btn" hidden>⏹ Stop</button>
+        <button id="dictate-use-btn" class="primary-btn" hidden>✓ Use This Text</button>
+      </div>
+
+      <button id="dictate-back-btn" class="ghost-btn" style="margin-top:1rem;">← Back</button>
     </section>
 
     <!-- ===== SCREEN 2: settings + reading ===== -->

@@ -170,6 +170,151 @@ function showScreen(id) {
 }
 
 // ------------------------------------------------------------
+// DICTATE + AUTO-FORMAT
+//
+// Reuses the exact same SpeechRecognition mechanism already proven out
+// for scoring a practice reading -- just pointed at free-form speech
+// instead of a known text to compare against. "Formatting" is real,
+// deterministic voice commands (the same convention Google Docs voice
+// typing and Apple Dictation both use) -- say "period", "comma", "new
+// paragraph", etc. and they become real punctuation/structure. This is
+// a free, zero-infrastructure way to do real formatting; a smarter
+// AI-based cleanup pass (fixing run-ons, inferring paragraphs without
+// being told to) is a separate, bigger decision -- see the project's
+// README for why that's treated deliberately rather than bundled in here.
+// ------------------------------------------------------------
+var VOICE_COMMAND_RULES = [
+  [/\bnew paragraph\b/gi, '\n\n'],
+  [/\bnew line\b/gi, '\n'],
+  [/\bfull stop\b/gi, '.'],
+  [/\bexclamation (?:point|mark)\b/gi, '!'],
+  [/\bquestion mark\b/gi, '?'],
+  [/\bopen quote\b/gi, '"'],
+  [/\bclose quote\b/gi, '"'],
+  [/\bsemicolon\b/gi, ';'],
+  [/\bcolon\b/gi, ':'],
+  [/\bcomma\b/gi, ','],
+  [/\bperiod\b/gi, '.'],
+  [/\bhyphen\b/gi, '-'],
+  [/\bdash\b/gi, '-']
+];
+
+function applyVoiceCommands(text) {
+  VOICE_COMMAND_RULES.forEach(function(rule) { text = text.replace(rule[0], rule[1]); });
+  text = text.replace(/[ \t]+([.,!?;:])/g, '$1');   // drop the space left behind before punctuation
+  text = text.replace(/[ \t]*\n[ \t]*/g, '\n');      // clean spacing around inserted line/paragraph breaks
+  text = text.replace(/[ \t]{2,}/g, ' ');
+  return text.trim();
+}
+
+function autoCapitalize(text) {
+  return text.replace(/(^\s*|[.!?]\s+|\n+\s*)([a-z])/g, function(m, sep, letter) {
+    return sep + letter.toUpperCase();
+  });
+}
+
+function processDictation(text) {
+  return autoCapitalize(applyVoiceCommands(text));
+}
+
+var dictateState = {
+  rawText: '',
+  recognition: null,
+  dictating: false
+};
+
+var dictateOutput = document.getElementById('dictate-output');
+
+document.getElementById('go-dictate-btn').addEventListener('click', function() {
+  showScreen('screen-dictate');
+});
+
+document.getElementById('dictate-back-btn').addEventListener('click', function() {
+  stopDictation();
+  showScreen('screen-upload');
+});
+
+document.getElementById('dictate-start-btn').addEventListener('click', function() {
+  startDictation();
+});
+
+document.getElementById('dictate-stop-btn').addEventListener('click', function() {
+  stopDictation();
+});
+
+document.getElementById('dictate-use-btn').addEventListener('click', function() {
+  textInput.value = processDictation(dictateState.rawText);
+  updateStartBtn();
+  showScreen('screen-upload');
+});
+
+function renderDictateOutput(interimText) {
+  var formatted = processDictation(dictateState.rawText);
+  dictateOutput.textContent = formatted;
+  if (interimText) {
+    var interimSpan = document.createElement('span');
+    interimSpan.className = 'interim';
+    interimSpan.textContent = (formatted ? ' ' : '') + interimText;
+    dictateOutput.appendChild(interimSpan);
+  }
+}
+
+function startDictation() {
+  if (!SpeechRecognitionCtor) {
+    alert('This browser doesn’t support speech recognition, so dictation isn’t available here. Typing or pasting your text still works fine.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('This browser does not support microphone access.');
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(function() {
+    dictateState.dictating = true;
+    document.getElementById('dictate-start-btn').hidden = true;
+    document.getElementById('dictate-stop-btn').hidden = false;
+    document.getElementById('dictate-use-btn').hidden = true;
+
+    dictateState.recognition = new SpeechRecognitionCtor();
+    dictateState.recognition.continuous = true;
+    dictateState.recognition.interimResults = true;
+    dictateState.recognition.onresult = function(event) {
+      var interim = '';
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        var transcript = event.results[i][0].transcript || '';
+        if (event.results[i].isFinal) {
+          dictateState.rawText += (dictateState.rawText ? ' ' : '') + transcript.trim();
+        } else {
+          interim += transcript;
+        }
+      }
+      renderDictateOutput(interim);
+    };
+    dictateState.recognition.onerror = function() { /* non-fatal -- keep listening/allow manual stop */ };
+    dictateState.recognition.onend = function() {
+      // Some browsers end recognition on their own after a pause even
+      // with continuous:true -- restart automatically unless the person
+      // actually pressed Stop.
+      if (dictateState.dictating) {
+        try { dictateState.recognition.start(); } catch (e) {}
+      }
+    };
+    try { dictateState.recognition.start(); } catch (e) {}
+  }).catch(function() {
+    alert('Microphone access is needed to dictate. Please allow it and try again.');
+  });
+}
+
+function stopDictation() {
+  dictateState.dictating = false;
+  if (dictateState.recognition) { try { dictateState.recognition.stop(); } catch (e) {} }
+  document.getElementById('dictate-start-btn').hidden = false;
+  document.getElementById('dictate-stop-btn').hidden = true;
+  document.getElementById('dictate-use-btn').hidden = dictateState.rawText.length === 0;
+  renderDictateOutput('');
+}
+
+// ------------------------------------------------------------
 // PACE SETTINGS
 // ------------------------------------------------------------
 var paceSlider = document.getElementById('pace-slider');

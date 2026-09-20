@@ -81,6 +81,15 @@ textarea {
 }
 .upload-filename { color: var(--muted); font-size: 0.85rem; }
 
+.or-divider { display: flex; align-items: center; gap: 0.8rem; margin: 1.4rem 0; color: var(--muted); font-size: 0.8rem; }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.dictate-output {
+  min-height: 8rem; white-space: pre-wrap; color: var(--ink);
+}
+.dictate-output:empty::before { content: 'Your words will appear here as you speak…'; color: var(--muted); font-style: italic; }
+.dictate-output .interim { color: var(--muted); }
+
 button { font-family: inherit; cursor: pointer; }
 .primary-btn {
   background: var(--accent); color: #fff; border: none;
