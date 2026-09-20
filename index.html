@@ -44,8 +44,10 @@
     <section id="screen-dictate" class="screen">
       <h1>Speak, and I'll transcribe it for you</h1>
       <p class="hint">
-        Say your words naturally, and say these out loud to add real punctuation and structure:
-        <strong>period, comma, question mark, exclamation point, colon, semicolon, hyphen, new line, new paragraph</strong>.
+        Just talk naturally — no need to say punctuation out loud. When you're done, hit
+        <strong>Format Document</strong> and sentences, paragraphs, and capitalization will be added
+        automatically from your natural pauses. (You can still say "period," "comma," "new paragraph," etc.
+        any time for more precise control — those are always honored too.)
       </p>
 
       <div id="dictate-output" class="reading-text dictate-output" aria-live="polite"></div>
@@ -53,6 +55,7 @@
       <div class="record-controls">
         <button id="dictate-start-btn" class="record-btn">⏺ Start Dictating</button>
         <button id="dictate-stop-btn" class="ghost-btn" hidden>⏹ Stop</button>
+        <button id="dictate-format-btn" class="secondary-btn" hidden>📝 Format Document</button>
         <button id="dictate-use-btn" class="primary-btn" hidden>✓ Use This Text</button>
       </div>
 

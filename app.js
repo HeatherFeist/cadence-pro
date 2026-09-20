@@ -217,8 +217,53 @@ function processDictation(text) {
   return autoCapitalize(applyVoiceCommands(text));
 }
 
+// A chunk that doesn't already end with real terminal punctuation (the
+// person didn't say "period"/"question mark"/etc. for it) reads as a
+// question if it starts with a common question word -- a real, honest
+// heuristic, not perfect (it can't catch every question), but a genuine
+// free signal rather than a guess dressed up as certainty.
+var QUESTION_STARTER_RE = /^(what|who|whom|whose|where|when|why|how|is|are|was|were|do|does|did|can|could|will|would|should|shall|has|have|had|may|might)\b/i;
+
+// A pause this long or longer between two spoken phrases reads as a
+// paragraph break rather than just a sentence break -- measured with real
+// wall-clock timestamps in our own code (see startDictation() below),
+// since the standard SpeechRecognition API doesn't expose pause/word
+// timing itself.
+var PARAGRAPH_PAUSE_MS = 2500;
+
+// The "Format Document" pass: turns free-form, unpunctuated speech into
+// real sentences and paragraphs using the actual pauses between phrases
+// (each `chunk` here is one of SpeechRecognition's own "final" results --
+// the recognizer's own endpointing already means that boundary is a real
+// pause in the person's speech, not an arbitrary split). Explicit spoken
+// commands ("period", "new paragraph", etc.) inside any chunk are still
+// honored first and take precedence over the inferred punctuation.
+function autoFormatChunks(chunks) {
+  var out = '';
+  chunks.forEach(function(chunk, i) {
+    var text = applyVoiceCommands(chunk.text).trim();
+    if (!text) return;
+    if (!/[.!?]$/.test(text)) {
+      text += QUESTION_STARTER_RE.test(text) ? '?' : '.';
+    }
+    text = text.charAt(0).toUpperCase() + text.slice(1);
+
+    if (i === 0 || !out) {
+      out = text;
+    } else if (chunk.pauseBeforeMs >= PARAGRAPH_PAUSE_MS) {
+      out += '\n\n' + text;
+    } else {
+      out += ' ' + text;
+    }
+  });
+  return out;
+}
+
 var dictateState = {
-  rawText: '',
+  chunks: [],           // [{text, pauseBeforeMs}] -- one entry per SpeechRecognition "final" result
+  lastChunkTime: null,
+  formattedText: '',
+  formatted: false,     // whether Format Document has already run on the CURRENT chunks
   recognition: null,
   dictating: false
 };
@@ -242,19 +287,39 @@ document.getElementById('dictate-stop-btn').addEventListener('click', function()
   stopDictation();
 });
 
+document.getElementById('dictate-format-btn').addEventListener('click', function() {
+  dictateState.formattedText = autoFormatChunks(dictateState.chunks);
+  dictateState.formatted = true;
+  renderDictateOutput('');
+  document.getElementById('dictate-use-btn').hidden = false;
+});
+
 document.getElementById('dictate-use-btn').addEventListener('click', function() {
-  textInput.value = processDictation(dictateState.rawText);
+  var text = dictateState.formatted ? dictateState.formattedText : liveJoinedText();
+  textInput.value = processDictation(text); // a safety-net capitalization pass either way
   updateStartBtn();
   showScreen('screen-upload');
 });
 
+// Plain, un-inferred view used WHILE dictating (and as the fallback if
+// "Use This Text" is clicked before ever pressing Format Document) --
+// just the chunks joined together, with any explicit spoken commands
+// still honored, but no pause-based sentence/paragraph guessing.
+function liveJoinedText() {
+  return dictateState.chunks
+    .map(function(c) { return applyVoiceCommands(c.text); })
+    .join(' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 function renderDictateOutput(interimText) {
-  var formatted = processDictation(dictateState.rawText);
-  dictateOutput.textContent = formatted;
-  if (interimText) {
+  var text = dictateState.formatted ? dictateState.formattedText : liveJoinedText();
+  dictateOutput.textContent = text;
+  if (interimText && !dictateState.formatted) {
     var interimSpan = document.createElement('span');
     interimSpan.className = 'interim';
-    interimSpan.textContent = (formatted ? ' ' : '') + interimText;
+    interimSpan.textContent = (text ? ' ' : '') + interimText;
     dictateOutput.appendChild(interimSpan);
   }
 }
@@ -273,6 +338,7 @@ function startDictation() {
     dictateState.dictating = true;
     document.getElementById('dictate-start-btn').hidden = true;
     document.getElementById('dictate-stop-btn').hidden = false;
+    document.getElementById('dictate-format-btn').hidden = true;
     document.getElementById('dictate-use-btn').hidden = true;
 
     dictateState.recognition = new SpeechRecognitionCtor();
@@ -283,7 +349,11 @@ function startDictation() {
       for (var i = event.resultIndex; i < event.results.length; i++) {
         var transcript = event.results[i][0].transcript || '';
         if (event.results[i].isFinal) {
-          dictateState.rawText += (dictateState.rawText ? ' ' : '') + transcript.trim();
+          var now = Date.now();
+          var pauseBeforeMs = dictateState.lastChunkTime ? (now - dictateState.lastChunkTime) : 0;
+          dictateState.lastChunkTime = now;
+          dictateState.chunks.push({ text: transcript.trim(), pauseBeforeMs: pauseBeforeMs });
+          dictateState.formatted = false; // new speech arrived -- any previous Format Document run is now stale
         } else {
           interim += transcript;
         }
@@ -294,7 +364,9 @@ function startDictation() {
     dictateState.recognition.onend = function() {
       // Some browsers end recognition on their own after a pause even
       // with continuous:true -- restart automatically unless the person
-      // actually pressed Stop.
+      // actually pressed Stop. This does NOT reset lastChunkTime, so a
+      // real pause spanning an auto-restart still counts correctly
+      // toward the paragraph-break heuristic above.
       if (dictateState.dictating) {
         try { dictateState.recognition.start(); } catch (e) {}
       }
@@ -310,7 +382,8 @@ function stopDictation() {
   if (dictateState.recognition) { try { dictateState.recognition.stop(); } catch (e) {} }
   document.getElementById('dictate-start-btn').hidden = false;
   document.getElementById('dictate-stop-btn').hidden = true;
-  document.getElementById('dictate-use-btn').hidden = dictateState.rawText.length === 0;
+  document.getElementById('dictate-format-btn').hidden = dictateState.chunks.length === 0;
+  document.getElementById('dictate-use-btn').hidden = dictateState.chunks.length === 0;
   renderDictateOutput('');
 }
 
